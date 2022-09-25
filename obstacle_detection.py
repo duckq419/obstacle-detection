@@ -6,37 +6,96 @@ from datetime import datetime
 import time
 import os
 from os import path
-import RPi.GPIO as GPIO
+import Jetson.GPIO as GPIO
 import time
 
-brake_pin = 12
+brake_pin = 18
+
 photo_height = 360
 photo_width = 1280
 img_height = 360
 img_width = 640
 
-# search 1
-def calc(idx):
-    x = 0
-    y = 0
-    map = []
-    while(x < 640):
-        x += 20
-        while(y < 360):
-            y += 20
-            div = 11
-            if(float(509.6/displ[x,y]) > 0): # to do not div 0
-                div = float(609.6/displ[x,y])
-            map.append(div)
-    return map[idx]
-    
-while True:
+np.seterr(divide='ignore', invalid='ignore')
+
+def img_capture():
+    def calcs():
+        cnt = 0
+        x = 0
+        y = 0
+        map = []
+        while(x < 640):
+            x += 20
+            while(y < 360):
+                y += 20
+                div = 11
+                try:
+                    div = float(609.6/displ[x,y])
+                    cnt += 1
+                    map.append(div)
+                except:
+                    map.append(99)
+        return map
+
+    def calc(idx):
+        x = 0
+        y = 0
+        map = []
+        while(x < 640):
+            x += 20
+            while(y < 360):
+                y += 20
+                div = 11
+                try:
+                    div = float(609.6/displ[x,y])
+                    global map_cnt
+                    map_cnt += 1
+                    map.append(div)
+                except:
+                    map.append(99)
+        return map[idx]
+
+    def brake():
+        idx = calcs()
+        GPIO.setmode(GPIO.BOARD) 
+        GPIO.setup(brake_pin, GPIO.OUT, initial=GPIO.HIGH)
+        i = 0
+        for i in range(len(calcs())):
+            if(i < 36):
+                if(float(idx[i]) <= 10):
+                    GPIO.output(brake_pin, GPIO.HIGH)
+                    # print(float(idx[i]))
+                    print("o")
+                else:
+                    GPIO.output(brake_pin, GPIO.LOW)
+                    # print(float(idx[i]))
+                    print("x")
+            elif(i > 36):
+                if(
+                    float(idx[i]) <= 10 and float(idx[i-1]) <= 10 and float(idx[i+1]) <= 10
+                    and float(idx[i-18]) <= 10 and float(idx[i-19]) <= 10 and float(idx[i-17]) <= 10
+                    and float(calc(idx+18)) <= 10 and float(idx[i+19]) <= 10 and float(idx[i+17]) <= 10
+                ):
+                    GPIO.output(brake_pin, GPIO.HIGH) 
+                    # print(float(idx[i]))
+                    print("o")
+                else:
+                    GPIO.output(brake_pin, GPIO.LOW)
+                    # print(float(idx[i]))
+                    print("x")
+            else:
+                GPIO.output(brake_pin, GPIO.LOW)
+                # print(float(idx[i]))
+                print("x")
+            i += 1
+
+        GPIO.cleanup()
+        cv2.destroyAllWindows
+        time.sleep(1)
+
+    # start
     left_camera = Start_Cameras(0).start()
     right_camera = Start_Cameras(1).start()
-    cv2.namedWindow("Images", cv2.WINDOW_NORMAL)
-    
-    t2 = datetime.now()
-    t1 = datetime.now()
     
     left_grabbed, left_frame = left_camera.read()
     right_grabbed, right_frame = right_camera.read()
@@ -52,8 +111,7 @@ while True:
             cv2.imwrite(filename, images)
                 
             t2 = datetime.now()
-            next
-                
+            next   
     filename = '../images/image_'+ str(1).zfill(2) + '.png'
     pair_img = cv2.imread(filename, -1)
     imgLeft = pair_img[0:img_height, 0:img_width]
@@ -112,37 +170,10 @@ while True:
         dtype=cv2.CV_8U
         )
     filteredImg = np.uint8(filteredImg)
-    
-    # cv2.imshow('Disparity', filteredImg)
 
-    # search 2
-    GPIO.setmode(GPIO.BOARD)
-    cnt = 0
-    idx = -1
-    min = 99999
-    try:
-        while(calc(cnt) != None):
-            if(calc(cnt) < min and calc(cnt) >= 0):
-                min = calc(cnt)
-                if(calc(cnt) == min):
-                    idx = cnt
-                print(calc(cnt), min)
-            cnt += 1
-    except:
-        print(-1)
+    brake()
 
-    if(calc(idx) <= 10 and calc(idx) >= 8):
-        GPIO.setup(brake_pin, GPIO.OUT)
-    elif(
-        calc(idx) <= 10 and calc(idx-1) <= 10 and calc(idx+1) <= 10
-        and calc(idx-18) <= 10 and calc(idx-19) <= 10 and calc(idx-17) <= 10
-        and calc(idx+18) <= 10 and calc(idx+19) <= 10 and calc(idx+17) <= 10
-    ):
-        GPIO.setup(brake_pin, GPIO.OUT)
-    else:
-        GPIO.output(brake_pin, GPIO.LOW)
-    print(min)
-    GPIO.cleanup()
-    cv2.waitKey(0)
-    cv2.destroyAllWindows
-    time.sleep(1)
+
+if __name__ == "__main__":
+    while True:
+        img_capture()
